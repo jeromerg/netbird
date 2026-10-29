@@ -50,3 +50,16 @@ v0.81.5 (`396976b8b`) unless stated otherwise.
 | `SBS-DNS-05` | | NetBird adapters are recognised by their friendly name (`wt*`) through `GetAdaptersAddresses` and skipped in the capture of fallback nameservers. If the adapter list cannot be read, only the own adapter is skipped, as today |
 | `SBS-POL-01` to `-04` | | The split lives in `mdm.Loader.Load`, so the daemon, the UI and the reload ticker all see the same policy. `disableNamedInstallations` counts only machine-wide. It is added to `docs/netbird.admx` and `docs/netbird.adml`, the public surface that Q13 accepted. The installer side of `SBS-POL-04` is step 5 |
 | Verification | `TestServer_SubcribeEvents` (`client/server`) fails under `-race` on the unmodified baseline too | Not related to this change; `make test-unit` runs without `-race` |
+
+## Step 4: tray UI
+
+| Requirement | Found | Done |
+|---|---|---|
+| `SBS-ID-09`, D2 | The specification gives the UI one channel, `--instance` | The UI reads `--instance` only, not `NB_INSTANCE`. An explicit `--daemon-addr` still wins (`SBS-UI-02`) |
+| `SBS-COL-02` | "A dot about 40 % of the icon width with a ring about 6 %" can be read as the ring inside or outside the 40 % | The coloured dot is 40 % of the width and the ring is drawn around it, so the whole mark is 52 % of the width, touching the top and left edges. Checked at 16 px in a rendered preview: the dot stays clear of the status badge and the update arrow and overlaps the tail of the bird |
+| `T-COL-02` | Golden images would add a dozen 256x256 PNGs to the repository | The golden test pins the SHA-256 of each composited icon's pixels (12 states and themes), and a pixel test checks that nothing outside the dot changes and that the dot and ring have the expected colours |
+| `SBS-UI-05` | The toast library writes `DisplayName = AppUserModelID` (`NetBird_acme`) every time the UI starts (`go-toast` `wintoast/registry.go:48`) | The named UI writes its `CustomActivator` before Wails reads it, and rewrites `DisplayName` to `NetBird (ACME)` once the application has started. Whether Windows shows the rewritten name is UNVERIFIED; `T-UI-04` shows it |
+| `SBS-UI-04` | The Wails fork's slug of `Options.Name` (`NetBird_acme`) is already `netbird_acme` | A named UI passes the identifier and `--instance <name>` explicitly through `EnableWithOptions`; the default UI calls `Enable()` as before |
+| `SBS-UI-03` | The tray menu has no header row today | A named UI's menu starts with a disabled `NetBird (ACME)` row and a separator; the default menu is unchanged. Window titles from the window manager get the suffix ` (ACME)` |
+| `SBS-UPD-01` | The UI offers the upstream installer in the tray's "update available" click and in the settings' update card | For a named installation `DownloadURL` returns nothing, the tray click does nothing and the card shows no download button; the "what's new" link to the release notes stays |
+| `SBS-UI-09`, `SBS-COL-04` | Both are SHOULD and need new frontend surface | Not implemented in this delivery: the settings window does not show the installation details, the window header has no colour stripe, and toasts use the undotted icon |

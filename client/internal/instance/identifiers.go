@@ -321,6 +321,29 @@ func (i Instance) UIAppName() string {
 	return "NetBird" + i.Marker()
 }
 
+// AutostartName returns the HKCU Run value name of the UI's autostart entry.
+func (i Instance) AutostartName() string {
+	return "netbird" + i.Marker()
+}
+
+// AutostartArguments returns the arguments the UI's autostart entry passes.
+func (i Instance) AutostartArguments() []string {
+	if i.IsDefault() {
+		return nil
+	}
+	return []string{"--instance", string(i.name)}
+}
+
+// WebviewDataDirName returns the folder, relative to the per-user directory,
+// that holds a named UI's WebView2 data, or the empty string for the default
+// UI, which keeps the library's default folder.
+func (i Instance) WebviewDataDirName() string {
+	if i.IsDefault() {
+		return ""
+	}
+	return "webview2"
+}
+
 // QuickActionsEvent returns the named event that brings the UI window up.
 func (i Instance) QuickActionsEvent() string {
 	return `Global\NetBird` + i.Marker() + `QuickActionsTriggerEvent`

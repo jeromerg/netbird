@@ -98,6 +98,8 @@ func main() {
 	// DaemonFeed's SubscribeEvents stream (see guilog.DebugLog).
 	debugLog := newDebugLog(userSetLogFile)
 
+	prepareToastIdentity(instance.Current())
+
 	// Declared before app.New so the SingleInstance callback closes over it.
 	var tray *Tray
 	app := newApplication(func() {
@@ -121,6 +123,7 @@ func main() {
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go requestNotificationAuthorization(notifier)
 		initDockObserver()
+		labelToastSource(instance.Current())
 	})
 
 	bundle, prefStore, localizer := buildI18n(app)
@@ -236,6 +239,17 @@ func requestNotificationAuthorization(notifier *Notifier) {
 	}
 }
 
+// flagPassed reports whether a flag was given on the command line.
+func flagPassed(name string) bool {
+	passed := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			passed = true
+		}
+	})
+	return passed
+}
+
 // parseFlagsAndInitLog returns the daemon gRPC address and userSetLogFile
 // (true when --log-file was passed). userSetLogFile is the manual-override
 // signal: true leaves logging alone, false lets the GUI manage a
@@ -243,7 +257,8 @@ func requestNotificationAuthorization(notifier *Notifier) {
 // "no flag" and an explicit "--log-file console" stay distinguishable; empty
 // falls back to console for InitLog.
 func parseFlagsAndInitLog() (string, bool) {
-	daemonAddr := flag.String("daemon-addr", DaemonAddr(), "Daemon gRPC address: unix:///path or tcp://host:port")
+	instanceArg := flag.String("instance", "", "Named installation this UI belongs to; empty for the default installation")
+	daemonAddr := flag.String("daemon-addr", DaemonAddr(), "Daemon gRPC address: unix:///path or tcp://host:port. Derived from --instance when not given")
 	logFiles := &stringList{}
 	flag.Var(logFiles, "log-file", "Log destination. Repeat to log to multiple targets at once, e.g. `--log-file console --log-file Y:/netbird-ui.log`. Each value is one of: console, syslog, or a file path. File destinations are rotated by lumberjack (same as the daemon). Defaults to console. Passing any value disables the daemon-debug-driven gui-client.log.")
 	logLevel := flag.String("log-level", "info", "Log level: trace|debug|info|warn|error.")
@@ -257,6 +272,14 @@ func parseFlagsAndInitLog() (string, bool) {
 
 	if err := util.InitLog(*logLevel, targets...); err != nil {
 		log.Fatalf("init log: %v", err)
+	}
+
+	inst, err := useInstance(*instanceArg)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	if !flagPassed("daemon-addr") {
+		*daemonAddr = inst.DaemonAddr()
 	}
 	return *daemonAddr, userSetLogFile
 }
@@ -297,6 +320,7 @@ func newApplication(onSecondInstance func()) *application.App {
 		Windows: application.WindowsOptions{
 			WndProcInterceptor:            endSessionInterceptor(),
 			DisableQuitOnLastWindowClosed: true,
+			WebviewUserDataPath:           webviewUserDataPath(instance.Current()),
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: instance.Current().UIUniqueID(),
@@ -361,7 +385,7 @@ func newMainWindow(app *application.App, prefStore *preferences.Store, wm *servi
 	appearance := services.CurrentAppearance()
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:   "main",
-		Title:  "NetBird",
+		Title:  instance.Current().DisplayName(),
 		Width:  initialWidth,
 		Height: services.WindowHeight,
 		// Center on first show; minimal WMs (fluxbox, the XEmbed tray path)
