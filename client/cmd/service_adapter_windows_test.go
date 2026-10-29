@@ -10,7 +10,7 @@ import (
 
 func TestHasHardwareID(t *testing.T) {
 	assert.True(t, hasHardwareID([]string{"Wintun"}, wintunHardwareID), "wintun")
-	assert.True(t, hasHardwareID([]string{"root\\other", "WINTUN"}, wintunHardwareID), "case-insensitive, any position")
+	assert.True(t, hasHardwareID([]string{"PCI\\VEN_8086", "WINTUN"}, wintunHardwareID), "case-insensitive, any position")
 	assert.False(t, hasHardwareID([]string{"Wintun2", "ROOT\\Wintun"}, wintunHardwareID), "only an exact ID")
 	assert.False(t, hasHardwareID("Wintun", wintunHardwareID), "a plain string is not a hardware ID list")
 	assert.False(t, hasHardwareID(nil, wintunHardwareID), "no value")
