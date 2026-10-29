@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/netbirdio/netbird/client/iface/wgaddr"
 	"github.com/netbirdio/netbird/client/internal/coexist"
 	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/peer"
@@ -65,6 +67,20 @@ func checkCoexistence(recorder *peer.Status, inst instance.Instance, cfg *Engine
 			joinPrefixes(partial)))
 	}
 	return nil
+}
+
+// watchCoexistence runs while a named secondary is connected. When another
+// NetBird adapter later gets an address inside this installation's overlay, it
+// reports the conflict and restarts the client; the connect check then keeps
+// the installation disconnected until the conflict is gone.
+func watchCoexistence(ctx context.Context, recorder *peer.Status, inst instance.Instance, ifaceName string,
+	addr wgaddr.Address, restart func()) {
+	c, ok := coexist.WatchOverlay(ctx, inst, ifaceName, addr)
+	if !ok {
+		return
+	}
+	publishCoexistence(recorder, cProto.SystemEvent_ERROR, c.Error())
+	restart()
 }
 
 func publishCoexistence(recorder *peer.Status, severity cProto.SystemEvent_Severity, msg string) {

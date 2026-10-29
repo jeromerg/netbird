@@ -516,6 +516,10 @@ func (c *ConnectClient) run(mobileDependency MobileDependency, runningChan chan 
 
 		log.Infof("Netbird engine started, the IP is: %s", peerConfig.GetAddress())
 		state.Set(StatusConnected)
+		if inst := instance.Current(); inst.IsSecondary() {
+			go watchCoexistence(engineCtx, c.statusRecorder, inst, engineConfig.WgIfaceName,
+				engineConfig.WgAddr, engine.triggerClientRestart)
+		}
 
 		if runningChan != nil {
 			select {
