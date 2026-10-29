@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	gstatus "google.golang.org/grpc/status"
 
-	"github.com/netbirdio/netbird/client/internal/daemonaddr"
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/ipcauth"
 	"github.com/netbirdio/netbird/client/internal/localmetrics"
 	"github.com/netbirdio/netbird/client/internal/profilemanager"
@@ -214,10 +214,11 @@ func unidentifiedSummary(action string) string {
 // reinstallCommand is the command that moves the daemon onto a socket whose
 // callers can be identified.
 func reinstallCommand() string {
+	addr := instance.Current().DaemonAddr()
 	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("netbird service install --daemon-addr %s", daemonaddr.WindowsPipeAddr)
+		return fmt.Sprintf("netbird service install --daemon-addr %s", addr)
 	}
-	return "sudo netbird service install --daemon-addr unix:///var/run/netbird.sock"
+	return fmt.Sprintf("sudo netbird service install --daemon-addr %s", addr)
 }
 
 func capitalize(s string) string {
@@ -302,14 +303,14 @@ func exposesLocalMetrics(stored *profilemanager.Config, change privilegedConfigC
 // tolerating a config that does not exist yet.
 func storedLocalMetrics(cfg *profilemanager.Config) (bool, string) {
 	if cfg == nil {
-		return false, localmetrics.DefaultListenAddress
+		return false, localmetrics.DefaultListenAddress()
 	}
 	return cfg.LocalMetricsEnabled, metricsAddrOrDefault(cfg.LocalMetricsAddress)
 }
 
 func metricsAddrOrDefault(addr string) string {
 	if addr == "" {
-		return localmetrics.DefaultListenAddress
+		return localmetrics.DefaultListenAddress()
 	}
 	return addr
 }

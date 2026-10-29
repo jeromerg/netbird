@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/netbirdio/netbird/client/anonymize"
 	daddr "github.com/netbirdio/netbird/client/internal/daemonaddr"
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/localmetrics"
 	"github.com/netbirdio/netbird/client/internal/profilemanager"
 )
@@ -127,35 +129,25 @@ func Execute() error {
 // maps, custom DNS resolver address, Rosenpass options, auto-connect
 // disabling, lazy connection).
 func init() {
-	defaultConfigPathDir = "/etc/netbird/"
-	defaultLogFileDir = "/var/log/netbird/"
+	inst := instance.Current()
+	defaultConfigPathDir = inst.LegacyConfigDir() + string(filepath.Separator)
+	defaultLogFileDir = inst.LogDir() + string(filepath.Separator)
 
 	oldDefaultConfigPathDir = "/etc/wiretrustee/"
 	oldDefaultLogFileDir = "/var/log/wiretrustee/"
 
-	switch runtime.GOOS {
-	case "windows":
-		defaultConfigPathDir = os.Getenv("PROGRAMDATA") + "\\Netbird\\"
-		defaultLogFileDir = os.Getenv("PROGRAMDATA") + "\\Netbird\\"
-
+	if runtime.GOOS == "windows" {
 		oldDefaultConfigPathDir = os.Getenv("PROGRAMDATA") + "\\Wiretrustee\\"
 		oldDefaultLogFileDir = os.Getenv("PROGRAMDATA") + "\\Wiretrustee\\"
-	case "freebsd":
-		defaultConfigPathDir = "/var/db/netbird/"
 	}
 
-	defaultConfigPath = defaultConfigPathDir + "config.json"
-	defaultLogFile = defaultLogFileDir + "client.log"
+	defaultConfigPath = filepath.Join(inst.LegacyConfigDir(), "config.json")
+	defaultLogFile = inst.LogFile()
 
 	oldDefaultConfigPath = oldDefaultConfigPathDir + "config.json"
 	oldDefaultLogFile = oldDefaultLogFileDir + "client.log"
 
-	defaultDaemonAddr := "unix:///var/run/netbird.sock"
-	if runtime.GOOS == "windows" {
-		defaultDaemonAddr = daddr.WindowsPipeAddr
-	}
-
-	rootCmd.PersistentFlags().StringVar(&daemonAddr, "daemon-addr", defaultDaemonAddr, "Daemon service address to serve CLI requests [unix|tcp|npipe]://[path|host:port|name]")
+	rootCmd.PersistentFlags().StringVar(&daemonAddr, "daemon-addr", inst.DaemonAddr(), "Daemon service address to serve CLI requests [unix|tcp|npipe]://[path|host:port|name]")
 	rootCmd.PersistentFlags().StringVarP(&managementURL, "management-url", "m", "", fmt.Sprintf("Management Service URL [http|https]://[host]:[port] (default \"%s\")", profilemanager.DefaultManagementURL))
 	rootCmd.PersistentFlags().StringVar(&adminURL, "admin-url", "", fmt.Sprintf("Admin Panel URL [http|https]://[host]:[port] (default \"%s\")", profilemanager.DefaultAdminURL))
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "sets NetBird log level")
@@ -223,7 +215,7 @@ func init() {
 	upCmd.PersistentFlags().BoolVar(&rosenpassPermissive, rosenpassPermissiveFlag, false, "[Experimental] Enable Rosenpass in permissive mode to allow this peer to accept WireGuard connections without requiring Rosenpass functionality from peers that do not have Rosenpass enabled.")
 	upCmd.PersistentFlags().BoolVar(&autoConnectDisabled, disableAutoConnectFlag, false, "Disables auto-connect feature. If enabled, then the client won't connect automatically when the service starts.")
 	upCmd.PersistentFlags().BoolVar(&localMetricsEnabled, enableLocalMetricsFlag, false, "Enables a local Prometheus /metrics endpoint exposing connection state (peers, latency, P2P vs relay).")
-	upCmd.PersistentFlags().StringVar(&localMetricsAddr, localMetricsAddressFlag, localmetrics.DefaultListenAddress, "Listen address of the local Prometheus /metrics endpoint.")
+	upCmd.PersistentFlags().StringVar(&localMetricsAddr, localMetricsAddressFlag, localmetrics.DefaultListenAddress(), "Listen address of the local Prometheus /metrics endpoint.")
 	upCmd.PersistentFlags().BoolVar(&lazyConnEnabled, enableLazyConnectionFlag, false, "Deprecated: no longer used. Lazy connections are controlled by the server and the NB_LAZY_CONN environment variable.")
 	_ = upCmd.PersistentFlags().MarkDeprecated(enableLazyConnectionFlag, "no longer used; lazy connections are controlled by the server and the NB_LAZY_CONN environment variable")
 

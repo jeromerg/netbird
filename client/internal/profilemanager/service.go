@@ -8,13 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/util"
 )
 
@@ -64,22 +64,9 @@ func (e *ErrAmbiguousHandle) Error() string {
 
 func init() {
 
-	DefaultConfigPathDir = "/var/lib/netbird/"
-	oldDefaultConfigPathDir = "/etc/netbird/"
-
-	if stateDir := os.Getenv("NB_STATE_DIR"); stateDir != "" {
-		DefaultConfigPathDir = stateDir
-	} else {
-		switch runtime.GOOS {
-		case "windows":
-			oldDefaultConfigPathDir = filepath.Join(os.Getenv("PROGRAMDATA"), "Netbird")
-			DefaultConfigPathDir = oldDefaultConfigPathDir
-
-		case "freebsd":
-			oldDefaultConfigPathDir = "/var/db/netbird/"
-			DefaultConfigPathDir = oldDefaultConfigPathDir
-		}
-	}
+	inst := instance.Current()
+	DefaultConfigPathDir = inst.ProfileDir()
+	oldDefaultConfigPathDir = inst.LegacyProfileDir()
 
 	oldDefaultConfigPath = filepath.Join(oldDefaultConfigPathDir, "config.json")
 	DefaultConfigPath = filepath.Join(DefaultConfigPathDir, "default.json")

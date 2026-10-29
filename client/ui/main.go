@@ -16,6 +16,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/ui/authsession"
 	"github.com/netbirdio/netbird/client/ui/i18n"
 	"github.com/netbirdio/netbird/client/ui/preferences"
@@ -279,7 +280,7 @@ func newApplication(onSecondInstance func()) *application.App {
 		// installer pre-populates with the toast activator CLSID; otherwise
 		// toasts show under a different identity and the MSI's CustomActivator
 		// value is orphaned.
-		Name:        "NetBird",
+		Name:        instance.Current().UIAppName(),
 		Description: "NetBird desktop client",
 		Icon:        appIcon,
 		Assets: application.AssetOptions{
@@ -298,7 +299,7 @@ func newApplication(onSecondInstance func()) *application.App {
 			DisableQuitOnLastWindowClosed: true,
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "io.netbird.ui",
+			UniqueID: instance.Current().UIUniqueID(),
 			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
 				onSecondInstance()
 			},

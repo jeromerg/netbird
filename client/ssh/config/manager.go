@@ -13,6 +13,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/netbirdio/netbird/client/internal/instance"
 	nbssh "github.com/netbirdio/netbird/client/ssh"
 	"github.com/netbirdio/netbird/shared/management/domain"
 )
@@ -103,7 +104,7 @@ func New() *Manager {
 	sshConfigDir := getSystemSSHConfigDir()
 	return &Manager{
 		sshConfigDir:  sshConfigDir,
-		sshConfigFile: nbssh.NetBirdSSHConfigFile,
+		sshConfigFile: instance.Current().SSHConfigFile(),
 	}
 }
 

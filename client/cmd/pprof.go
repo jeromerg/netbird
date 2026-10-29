@@ -8,6 +8,8 @@ import (
 	"os"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/netbirdio/netbird/client/internal/instance"
 )
 
 func init() {
@@ -18,7 +20,7 @@ func init() {
 func pprofAddr() string {
 	listenAddr := os.Getenv("NB_PPROF_ADDR")
 	if listenAddr == "" {
-		return "localhost:6969"
+		return instance.Current().PprofAddr()
 	}
 
 	return listenAddr

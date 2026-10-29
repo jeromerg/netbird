@@ -15,9 +15,8 @@ import (
 	"github.com/netbirdio/netbird/client/iface/configurer"
 	"github.com/netbirdio/netbird/client/iface/udpmux"
 	"github.com/netbirdio/netbird/client/iface/wgaddr"
+	"github.com/netbirdio/netbird/client/internal/instance"
 )
-
-const defaultWindowsGUIDSTring = "{f2f29e61-d91f-4d76-8151-119b20c4bdeb}"
 
 type TunDevice struct {
 	name    string
@@ -46,7 +45,7 @@ func NewTunDevice(name string, address wgaddr.Address, port int, key string, mtu
 }
 
 func getGUID() (windows.GUID, error) {
-	guidString := defaultWindowsGUIDSTring
+	guidString := instance.Current().AdapterGUID()
 	if CustomWindowsGUIDString != "" {
 		guidString = CustomWindowsGUIDString
 	}

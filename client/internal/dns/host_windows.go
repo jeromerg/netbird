@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 
 	nberrors "github.com/netbirdio/netbird/client/errors"
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/statemanager"
 	"github.com/netbirdio/netbird/client/internal/winregistry"
 )
@@ -36,17 +37,6 @@ var (
 // Registry locations of the host DNS configuration this package programs,
 // exported so a diagnostic reader reports the same locations that are written.
 const (
-	// NRPTKeyPrefix starts the name of every NRPT rule key this client creates:
-	// the match rules, the catch-all, and the .local exemption. Cleanup
-	// enumerates by this prefix, so a new kind of rule is removed by existing
-	// code as long as its key starts here.
-	NRPTKeyPrefix = "NetBird-"
-
-	// nrptMatchKeyName names the match-domain rules. Older versions used
-	// different layouts under the same name: a single unsuffixed key, then one
-	// key per domain, now one key per batch of domains.
-	nrptMatchKeyName = NRPTKeyPrefix + "Match"
-
 	// DNSPolicyConfigRoot holds the NRPT rules of the local policy store.
 	DNSPolicyConfigRoot = `SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig`
 
@@ -60,13 +50,38 @@ const (
 	InterfaceConfigPathV6 = `SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces`
 )
 
+// NRPTKeyPrefix starts the name of every NRPT rule key this installation
+// creates: the match rules, the catch-all, and the .local exemption. Cleanup
+// enumerates by this prefix, so a new kind of rule is removed by existing code as
+// long as its key starts here.
+func NRPTKeyPrefix() string {
+	return instance.Current().NRPTKeyPrefix()
+}
+
+// nrptMatchKeyName names the match-domain rules. Older versions used different
+// layouts under the same name: a single unsuffixed key, then one key per domain,
+// now one key per batch of domains.
+func nrptMatchKeyName() string {
+	return NRPTKeyPrefix() + "Match"
+}
+
+func dnsPolicyConfigMatchPath() string {
+	return DNSPolicyConfigRoot + `\` + nrptMatchKeyName()
+}
+
+func gpoDnsPolicyConfigMatchPath() string {
+	return GPODNSPolicyConfigRoot + `\` + nrptMatchKeyName()
+}
+
+func dnsPolicyConfigExemptLocalPath() string {
+	return DNSPolicyConfigRoot + `\` + NRPTKeyPrefix() + `ExemptLocal`
+}
+
+func gpoDnsPolicyConfigExemptLocalPath() string {
+	return GPODNSPolicyConfigRoot + `\` + NRPTKeyPrefix() + `ExemptLocal`
+}
+
 const (
-	dnsPolicyConfigMatchPath    = DNSPolicyConfigRoot + `\` + nrptMatchKeyName
-	gpoDnsPolicyConfigMatchPath = GPODNSPolicyConfigRoot + `\` + nrptMatchKeyName
-
-	dnsPolicyConfigExemptLocalPath    = DNSPolicyConfigRoot + `\` + NRPTKeyPrefix + `ExemptLocal`
-	gpoDnsPolicyConfigExemptLocalPath = GPODNSPolicyConfigRoot + `\` + NRPTKeyPrefix + `ExemptLocal`
-
 	nrptCatchAllNamespace = "."
 	// nrptLocalNamespace is reserved for multicast DNS by RFC 6762: a unicast
 	// resolver must not answer for it. The catch-all rule would hand it to us
@@ -405,8 +420,8 @@ func (r *registryConfigurator) addDNSMatchPolicy(domains []string, ip netip.Addr
 		}
 		batchDomains := domains[i:end]
 
-		localPath := fmt.Sprintf("%s-%d", dnsPolicyConfigMatchPath, ruleIndex)
-		gpoPath := fmt.Sprintf("%s-%d", gpoDnsPolicyConfigMatchPath, ruleIndex)
+		localPath := fmt.Sprintf("%s-%d", dnsPolicyConfigMatchPath(), ruleIndex)
+		gpoPath := fmt.Sprintf("%s-%d", gpoDnsPolicyConfigMatchPath(), ruleIndex)
 
 		if err := r.configureDNSPolicy(localPath, batchDomains, ip); err != nil {
 			return fmt.Errorf("configure DNS Local policy for rule %d: %w", ruleIndex, err)
@@ -442,12 +457,12 @@ func (r *registryConfigurator) addDNSMatchPolicy(domains []string, ip netip.Addr
 func (r *registryConfigurator) addDNSExemptLocalPolicy() error {
 	var noServers netip.Addr
 
-	if err := r.configureDNSPolicy(dnsPolicyConfigExemptLocalPath, []string{nrptLocalNamespace}, noServers); err != nil {
+	if err := r.configureDNSPolicy(dnsPolicyConfigExemptLocalPath(), []string{nrptLocalNamespace}, noServers); err != nil {
 		return fmt.Errorf("configure exempt policy for %s: %w", nrptLocalNamespace, err)
 	}
 
 	if r.gpo {
-		if err := r.configureDNSPolicy(gpoDnsPolicyConfigExemptLocalPath, []string{nrptLocalNamespace}, noServers); err != nil {
+		if err := r.configureDNSPolicy(gpoDnsPolicyConfigExemptLocalPath(), []string{nrptLocalNamespace}, noServers); err != nil {
 			return fmt.Errorf("configure gpo exempt policy for %s: %w", nrptLocalNamespace, err)
 		}
 		if err := refreshGroupPolicy(); err != nil {
@@ -746,7 +761,7 @@ func listNRPTRuleKeys(root string) ([]string, error) {
 	var ruleKeys []string
 	for _, name := range names {
 		// registry key names are case insensitive
-		if strings.HasPrefix(strings.ToLower(name), strings.ToLower(NRPTKeyPrefix)) {
+		if strings.HasPrefix(strings.ToLower(name), strings.ToLower(NRPTKeyPrefix())) {
 			ruleKeys = append(ruleKeys, name)
 		}
 	}
