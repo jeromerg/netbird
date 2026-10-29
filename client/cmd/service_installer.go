@@ -204,6 +204,8 @@ var uninstallCmd = &cobra.Command{
 			return err
 		}
 
+		removeLeftoverAdapter(s)
+
 		if err := s.Uninstall(); err != nil {
 			return fmt.Errorf("uninstall service: %w", err)
 		}
