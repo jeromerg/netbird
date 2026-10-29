@@ -107,6 +107,12 @@ func upFunc(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed initializing log %v", err)
 	}
 
+	logInstanceWarnings()
+
+	if err := checkInterfaceNameFlag(cmd, interfaceExists); err != nil {
+		return err
+	}
+
 	err = validateNATExternalIPs(natExternalIPs)
 	if err != nil {
 		return err
@@ -194,7 +200,7 @@ func createProfile(ctx context.Context, profileName, username string) (profilema
 		//nolint
 		return "", fmt.Errorf("failed to connect to daemon error: %v\n"+
 			"If the daemon is not running please run: "+
-			"\nnetbird service install \nnetbird service start\n", err)
+			"\n"+daemonStartHint(), err)
 	}
 	defer conn.Close()
 
@@ -295,7 +301,7 @@ func runInDaemonMode(ctx context.Context, cmd *cobra.Command, pm *profilemanager
 		//nolint
 		return fmt.Errorf("failed to connect to daemon error: %v\n"+
 			"If the daemon is not running please run: "+
-			"\nnetbird service install \nnetbird service start\n", err)
+			"\n"+daemonStartHint(), err)
 	}
 	defer func() {
 		err := conn.Close()

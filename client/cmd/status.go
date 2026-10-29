@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/netbirdio/netbird/client/internal"
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/proto"
 	nbstatus "github.com/netbirdio/netbird/client/status"
 	"github.com/netbirdio/netbird/util"
@@ -126,6 +127,11 @@ func statusFunc(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var installationName, installationRole string
+	if inst := instance.Current(); !inst.IsDefault() {
+		installationName, installationRole = string(inst.Name()), string(inst.Role())
+	}
+
 	var outputInformationHolder = nbstatus.ConvertToStatusOutputOverview(resp.GetFullStatus(), nbstatus.ConvertOptions{
 		Anonymize:            anonymizeEnabled,
 		AnonymizeLevel:       anonymizeLevel,
@@ -137,6 +143,8 @@ func statusFunc(cmd *cobra.Command, args []string) error {
 		IPsFilter:            ipsFilterMap,
 		ConnectionTypeFilter: connectionTypeFilter,
 		ProfileName:          profName,
+		InstallationName:     installationName,
+		InstallationRole:     installationRole,
 		SessionExpiresAt:     sessionExpiresAt,
 	})
 	var statusOutputString string
@@ -166,7 +174,7 @@ func getStatus(ctx context.Context, fullPeerStatus bool, shouldRunProbes bool) (
 		//nolint
 		return nil, fmt.Errorf("failed to connect to daemon error: %v\n"+
 			"If the daemon is not running please run: "+
-			"\nnetbird service install \nnetbird service start\n", err)
+			"\n"+daemonStartHint(), err)
 	}
 	defer conn.Close()
 

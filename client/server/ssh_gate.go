@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"runtime"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -140,7 +139,7 @@ func requirePrivilegeForDeregistration(ctx context.Context, cfg *profilemanager.
 
 	return denyPrivileged(ctx,
 		"deregistering this peer while the NetBird SSH server is enabled",
-		ipcauth.ElevatedCommand("netbird logout"))
+		ipcauth.ElevatedCommand(ipcauth.CLICommand("logout")))
 }
 
 // denyPrivileged returns nil when the caller is privileged, and otherwise a
@@ -214,11 +213,7 @@ func unidentifiedSummary(action string) string {
 // reinstallCommand is the command that moves the daemon onto a socket whose
 // callers can be identified.
 func reinstallCommand() string {
-	addr := instance.Current().DaemonAddr()
-	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("netbird service install --daemon-addr %s", addr)
-	}
-	return fmt.Sprintf("sudo netbird service install --daemon-addr %s", addr)
+	return ipcauth.ElevatedCommand(ipcauth.CLICommand("service install --daemon-addr " + instance.Current().DaemonAddr()))
 }
 
 func capitalize(s string) string {

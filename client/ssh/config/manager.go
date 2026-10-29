@@ -89,6 +89,9 @@ func writeFileWithTimeout(filename string, data []byte, perm os.FileMode) error 
 type Manager struct {
 	sshConfigDir  string
 	sshConfigFile string
+	// instanceFlag makes the generated commands address the installation
+	// that wrote the file, empty for the default installation.
+	instanceFlag string
 }
 
 // PeerSSHInfo represents a peer's SSH configuration information
@@ -105,6 +108,7 @@ func New() *Manager {
 	return &Manager{
 		sshConfigDir:  sshConfigDir,
 		sshConfigFile: instance.Current().SSHConfigFile(),
+		instanceFlag:  instance.Current().CLIFlag(),
 	}
 }
 
@@ -172,7 +176,7 @@ func (m *Manager) buildConfigHeader() string {
 		"# Generated automatically - do not edit manually\n" +
 		"#\n" +
 		"# To disable SSH config management, use:\n" +
-		"#   netbird service reconfigure --service-env NB_DISABLE_SSH_CONFIG=true\n" +
+		"#   " + m.cliCommand("service reconfigure --service-env NB_DISABLE_SSH_CONFIG=true") + "\n" +
 		"#\n\n"
 }
 
@@ -192,12 +196,16 @@ func (m *Manager) buildPeerConfig(allHostPatterns []string) (string, error) {
 	}
 
 	hostList := strings.Join(deduplicatedPatterns, ",")
-	config := fmt.Sprintf("Match host \"%s\" exec \"%s ssh detect %%h %%p\"\n", hostList, execPath)
+	command := execPath
+	if m.instanceFlag != "" {
+		command += " " + m.instanceFlag
+	}
+	config := fmt.Sprintf("Match host \"%s\" exec \"%s ssh detect %%h %%p\"\n", hostList, command)
 	config += "    PreferredAuthentications password,publickey,keyboard-interactive\n"
 	config += "    PasswordAuthentication yes\n"
 	config += "    PubkeyAuthentication yes\n"
 	config += "    BatchMode no\n"
-	config += fmt.Sprintf("    ProxyCommand %s ssh proxy %%h %%p\n", execPath)
+	config += fmt.Sprintf("    ProxyCommand %s ssh proxy %%h %%p\n", command)
 	config += "    StrictHostKeyChecking no\n"
 
 	if runtime.GOOS == "windows" {
@@ -286,6 +294,14 @@ func (m *Manager) RemoveSSHClientConfig() error {
 		log.Infof("Removed NetBird SSH config: %s", sshConfigPath)
 	}
 	return nil
+}
+
+// cliCommand renders a netbird command for this installation.
+func (m *Manager) cliCommand(args string) string {
+	if m.instanceFlag != "" {
+		return "netbird " + m.instanceFlag + " " + args
+	}
+	return "netbird " + args
 }
 
 func (m *Manager) getNetBirdExecutablePath() (string, error) {

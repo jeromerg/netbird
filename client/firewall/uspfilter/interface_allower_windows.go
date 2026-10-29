@@ -41,6 +41,10 @@ func (a *WindowsInterfaceAllower) Apply() error {
 	inst := instance.Current()
 	ruleName, ruleNameV6 := inst.FirewallRuleName(), inst.FirewallRuleNameV6()
 
+	if !inst.IsDefault() {
+		removeStaleRules(ruleName, ruleNameV6)
+	}
+
 	if !isFirewallRuleActive(ruleName) {
 		if err := manageFirewallRule(ruleName,
 			addRule,
@@ -91,6 +95,21 @@ func (a *WindowsInterfaceAllower) Close() error {
 		}
 	}
 	return nberrors.FormatErrorOrNil(merr)
+}
+
+// removeStaleRules deletes rules left by an earlier run of a named installation.
+// The rules have no crash state, so after a crash and an address change a reused
+// rule would allow the old overlay address and keep blocking the new one;
+// recreating them is simpler than parsing netsh's localized output.
+func removeStaleRules(names ...string) {
+	for _, name := range names {
+		if !isFirewallRuleActive(name) {
+			continue
+		}
+		if err := manageFirewallRule(name, deleteRule); err != nil {
+			log.Warnf("remove stale windows firewall rule %s: %v", name, err)
+		}
+	}
 }
 
 func manageFirewallRule(ruleName string, action action, extraArgs ...string) error {

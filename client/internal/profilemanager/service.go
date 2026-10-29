@@ -63,8 +63,13 @@ func (e *ErrAmbiguousHandle) Error() string {
 }
 
 func init() {
+	setPathsFor(instance.Current())
+	instance.OnSetCurrent(setPathsFor)
+}
 
-	inst := instance.Current()
+// setPathsFor points the daemon-side profile paths at an installation's state
+// directory.
+func setPathsFor(inst instance.Instance) {
 	DefaultConfigPathDir = inst.ProfileDir()
 	oldDefaultConfigPathDir = inst.LegacyProfileDir()
 

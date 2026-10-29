@@ -27,6 +27,7 @@ import (
 	"github.com/netbirdio/netbird/client/anonymize"
 	daddr "github.com/netbirdio/netbird/client/internal/daemonaddr"
 	"github.com/netbirdio/netbird/client/internal/instance"
+	"github.com/netbirdio/netbird/client/internal/ipcauth"
 	"github.com/netbirdio/netbird/client/internal/localmetrics"
 	"github.com/netbirdio/netbird/client/internal/profilemanager"
 )
@@ -97,6 +98,10 @@ var (
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			SetFlagsFromEnvVars(cmd.Root())
+
+			if err := resolveInstance(cmd); err != nil {
+				return err
+			}
 
 			// Don't resolve for service commands — they create the socket, not connect to it.
 			if !isServiceCmd(cmd) {
@@ -240,6 +245,9 @@ func SetupCloseHandler(ctx context.Context, cancel context.CancelFunc) {
 func SetFlagsFromEnvVars(cmd *cobra.Command) {
 	flags := cmd.PersistentFlags()
 	flags.VisitAll(func(f *pflag.Flag) {
+		if isEnvExempt(f.Name) {
+			return
+		}
 		oldEnvVar := FlagNameToEnvVar(f.Name, "WT_")
 
 		if value, present := os.LookupEnv(oldEnvVar); present {
@@ -363,6 +371,10 @@ func getSetupKeyFromFile(setupKeyPath string) (string, error) {
 }
 
 func handleRebrand(cmd *cobra.Command) error {
+	// The Wiretrustee rebrand predates named installations.
+	if !instance.Current().IsDefault() {
+		return nil
+	}
 	var err error
 	if slices.Contains(logFiles, defaultLogFile) {
 		if migrateToNetbird(oldDefaultLogFile, defaultLogFile) {
@@ -471,6 +483,11 @@ func migrateToNetbird(oldPath, newPath string) bool {
 	return true
 }
 
+// daemonStartHint is the command pair suggested when the daemon is not running.
+func daemonStartHint() string {
+	return ipcauth.CLICommand("service install ") + "\n" + ipcauth.CLICommand("service start") + "\n"
+}
+
 func getClient(cmd *cobra.Command) (*grpc.ClientConn, error) {
 	cmd.SetOut(cmd.OutOrStdout())
 
@@ -479,7 +496,7 @@ func getClient(cmd *cobra.Command) (*grpc.ClientConn, error) {
 		//nolint
 		return nil, fmt.Errorf("failed to connect to daemon error: %v\n"+
 			"If the daemon is not running please run: "+
-			"\nnetbird service install \nnetbird service start\n", err)
+			"\n"+daemonStartHint(), err)
 	}
 
 	return conn, nil

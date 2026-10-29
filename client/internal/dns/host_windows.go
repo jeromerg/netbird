@@ -758,15 +758,7 @@ func listNRPTRuleKeys(root string) ([]string, error) {
 		return nil, fmt.Errorf("read subkey names: %w", err)
 	}
 
-	var ruleKeys []string
-	for _, name := range names {
-		// registry key names are case insensitive
-		if strings.HasPrefix(strings.ToLower(name), strings.ToLower(NRPTKeyPrefix())) {
-			ruleKeys = append(ruleKeys, name)
-		}
-	}
-
-	return ruleKeys, nil
+	return filterNRPTRuleKeys(names, NRPTKeyPrefix()), nil
 }
 
 func removeRegistryKeyFromDNSPolicyConfig(regKeyPath string) error {

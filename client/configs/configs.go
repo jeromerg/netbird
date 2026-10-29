@@ -14,4 +14,7 @@ var StateDir string
 
 func init() {
 	StateDir = instance.Current().StateDir()
+	instance.OnSetCurrent(func(inst instance.Instance) {
+		StateDir = inst.StateDir()
+	})
 }

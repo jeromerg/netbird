@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 )
 
@@ -51,7 +52,12 @@ type Instance struct {
 	getenv func(string) string
 }
 
-var current atomic.Pointer[Instance]
+var (
+	current atomic.Pointer[Instance]
+
+	hooksMu sync.Mutex
+	hooks   []func(Instance)
+)
 
 // Default returns the default installation for the running platform.
 func Default() Instance {
@@ -72,12 +78,47 @@ func For(input string) (Instance, error) {
 	return newInstance(runtime.GOOS, os.Getenv, name, label), nil
 }
 
-// Current returns the installation this process runs as.
+// ForPlatform is For for another platform, so tools and tests can derive the
+// identifiers of a Windows installation on any host. It reads the environment
+// of the running process.
+func ForPlatform(goos, input string) (Instance, error) {
+	name, label, err := ParseName(input)
+	if err != nil {
+		return Instance{}, err
+	}
+	if name != DefaultName && goos != goosWindows {
+		return Instance{}, ErrNamedUnsupported
+	}
+	return newInstance(goos, os.Getenv, name, label), nil
+}
+
+// Current returns the installation this process runs as: the default one until
+// SetCurrent is called.
 func Current() Instance {
 	if p := current.Load(); p != nil {
 		return *p
 	}
 	return Default()
+}
+
+// SetCurrent makes inst the installation this process runs as. Packages that
+// keep a derived value in a package variable register with OnSetCurrent and
+// recompute it here. Call it once, before anything uses those values.
+func SetCurrent(inst Instance) {
+	hooksMu.Lock()
+	defer hooksMu.Unlock()
+	current.Store(&inst)
+	for _, fn := range hooks {
+		fn(inst)
+	}
+}
+
+// OnSetCurrent registers fn to run with the new installation whenever
+// SetCurrent is called.
+func OnSetCurrent(fn func(Instance)) {
+	hooksMu.Lock()
+	defer hooksMu.Unlock()
+	hooks = append(hooks, fn)
 }
 
 func newInstance(goos string, getenv func(string) string, name Name, label string) Instance {

@@ -332,6 +332,33 @@ func (i Instance) DebugTriggerEvent() string {
 	return `Global\Netbird` + i.Marker() + `DebugTriggerEvent`
 }
 
+// CLIFlag returns the global flag that addresses this installation from the
+// CLI, or the empty string for the default installation.
+func (i Instance) CLIFlag() string {
+	if i.IsDefault() {
+		return ""
+	}
+	return "--instance " + string(i.name)
+}
+
+// CLICommand renders a netbird command line that acts on this installation,
+// for hints that users copy and paste.
+func (i Instance) CLICommand(args string) string {
+	if flag := i.CLIFlag(); flag != "" {
+		return "netbird " + flag + " " + args
+	}
+	return "netbird " + args
+}
+
+// RecordKey returns the HKLM path of the installation record, or the empty
+// string for the default installation, which has none.
+func (i Instance) RecordKey() string {
+	if i.IsDefault() {
+		return ""
+	}
+	return recordsKey + `\` + string(i.name)
+}
+
 // machineDir is the per-installation folder under ProgramData, which the log,
 // the panic log and the updater use even when NB_STATE_DIR moves the state.
 func (i Instance) machineDir() string {
