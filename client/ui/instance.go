@@ -14,6 +14,7 @@ import (
 
 	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/ui/instancecolor"
+	"github.com/netbirdio/netbird/client/ui/services"
 )
 
 // instanceColour is the named installation's colour, nil for the default
@@ -40,7 +41,10 @@ func useInstance(input string) (instance.Instance, error) {
 	rec, err := instance.LoadRecord(inst.Name())
 	switch {
 	case err == nil:
-		inst = inst.WithLabel(rec.Label)
+		var roleErr error
+		if inst, roleErr = rec.Apply(inst); roleErr != nil {
+			log.Warnf("installation record of %s: %v", inst.Name(), roleErr)
+		}
 		if c, cerr := instancecolor.Parse(rec.Color); cerr == nil {
 			instanceColour = &c
 		} else {
@@ -52,6 +56,58 @@ func useInstance(input string) (instance.Instance, error) {
 
 	instance.SetCurrent(inst)
 	return inst, nil
+}
+
+// installationDetails is what the settings window and the window header show
+// about the installation. The default installation shows nothing.
+func installationDetails(inst instance.Instance) services.InstallationDetails {
+	if inst.IsDefault() {
+		return services.InstallationDetails{}
+	}
+	d := services.InstallationDetails{
+		Named: true,
+		Name:  string(inst.Name()),
+		Label: inst.Label(),
+		Role:  string(inst.Role()),
+	}
+	if instanceColour != nil {
+		d.Color = instancecolor.Hex(*instanceColour)
+	}
+	return d
+}
+
+// notificationLogoFile is where a named UI keeps the dotted logo it shows on
+// its notifications, rewritten at every start.
+const notificationLogoFile = "notification-logo.png"
+
+// writeNotificationLogo draws the installation colour on the window logo for
+// the notifications and returns the file it wrote, or "" for an installation
+// without colour or when writing fails: notifications then show the plain logo.
+func writeNotificationLogo(inst instance.Instance) string {
+	if instanceColour == nil {
+		return ""
+	}
+	logo, err := instancecolor.NotificationLogo(iconWindow, *instanceColour, instancecolor.RingOnDark)
+	if err != nil {
+		log.Warnf("draw the notification logo: %v", err)
+		return ""
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		log.Warnf("locate the per-user directory for the notification logo: %v", err)
+		return ""
+	}
+	dir = filepath.Join(dir, inst.UserDirName())
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Warnf("create %s: %v", dir, err)
+		return ""
+	}
+	path := filepath.Join(dir, notificationLogoFile)
+	if err := os.WriteFile(path, logo, 0o600); err != nil {
+		log.Warnf("write the notification logo: %v", err)
+		return ""
+	}
+	return path
 }
 
 // webviewUserDataPath gives a named UI its own WebView2 data folder: two

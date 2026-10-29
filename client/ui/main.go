@@ -115,6 +115,7 @@ func main() {
 	update := services.NewUpdate(conn, updaterHolder)
 	daemonFeed := services.NewDaemonFeed(conn, app.Event, updaterHolder, debugLog)
 	notifier := newNotifier()
+	notifier.logo = writeNotificationLogo(instance.Current())
 	compat := services.NewCompat(conn)
 	// macOS shows no toast until permission is requested. Run it after
 	// ApplicationStarted so the notifier's Startup has initialised the
@@ -371,6 +372,7 @@ func registerServices(app *application.App, conn *Conn, s registeredServices) {
 	app.RegisterService(application.NewService(services.NewPreferences(s.prefStore)))
 	app.RegisterService(application.NewService(services.NewAutostart(app.Autostart)))
 	app.RegisterService(application.NewService(services.NewVersion()))
+	app.RegisterService(application.NewService(services.NewInstallation(installationDetails(instance.Current()))))
 	app.RegisterService(application.NewService(services.NewUILog()))
 	app.RegisterService(application.NewService(s.compat))
 }

@@ -37,6 +37,25 @@ func DotBounds(b image.Rectangle) image.Rectangle {
 // Overlay returns the PNG icon with a dot of colour fill and a ring of colour
 // ring drawn in its top-left corner, at the icon's native size.
 func Overlay(icon []byte, fill, ring color.NRGBA) ([]byte, error) {
+	return overlayAt(icon, fill, ring, func(b image.Rectangle) float64 {
+		return outerRadius(b.Dx())
+	})
+}
+
+// NotificationLogo returns the PNG icon with the dot moved towards the centre
+// along the diagonal, just enough that the circle Windows crops notification
+// logos to keeps the whole dot and ring, including its anti-aliased edge.
+func NotificationLogo(icon []byte, fill, ring color.NRGBA) ([]byte, error) {
+	return overlayAt(icon, fill, ring, func(b image.Rectangle) float64 {
+		const edge = 1
+		half := float64(b.Dx()) / 2
+		return half - (half-outerRadius(b.Dx())-edge)/math.Sqrt2
+	})
+}
+
+// overlayAt draws the dot centred at (offset, offset) from the icon's top-left
+// corner.
+func overlayAt(icon []byte, fill, ring color.NRGBA, offset func(image.Rectangle) float64) ([]byte, error) {
 	src, err := png.Decode(bytes.NewReader(icon))
 	if err != nil {
 		return nil, fmt.Errorf("decode icon: %w", err)
@@ -47,9 +66,12 @@ func Overlay(icon []byte, fill, ring color.NRGBA) ([]byte, error) {
 
 	outer := outerRadius(b.Dx())
 	inner := float64(b.Dx()) * dotFraction / 2
-	cx, cy := float64(b.Min.X)+outer, float64(b.Min.Y)+outer
+	cx, cy := float64(b.Min.X)+offset(b), float64(b.Min.Y)+offset(b)
 
-	area := DotBounds(b)
+	area := image.Rect(
+		int(math.Floor(cx-outer)), int(math.Floor(cy-outer)),
+		int(math.Ceil(cx+outer)), int(math.Ceil(cy+outer)),
+	).Intersect(b)
 	for y := area.Min.Y; y < area.Max.Y; y++ {
 		for x := area.Min.X; x < area.Max.X; x++ {
 			d := math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy)

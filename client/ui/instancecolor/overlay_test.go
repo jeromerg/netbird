@@ -81,6 +81,43 @@ func TestOverlayEveryTrayIcon(t *testing.T) {
 	}
 }
 
+// SBS-COL-04: Windows crops a notification logo to the inscribed circle, so the
+// whole dot and ring must lie inside it; the logo is otherwise unchanged.
+func TestNotificationLogoFitsTheCircle(t *testing.T) {
+	fill, err := Parse("#E69F00")
+	require.NoError(t, err)
+	srcBytes, err := os.ReadFile(filepath.Join("..", "assets", "netbird.png"))
+	require.NoError(t, err)
+
+	out, err := NotificationLogo(srcBytes, fill, RingOnDark)
+	require.NoError(t, err)
+	src, got := decodeNRGBA(t, srcBytes), decodeNRGBA(t, out)
+	require.Equal(t, src.Bounds(), got.Bounds(), "native size kept")
+
+	w := src.Bounds().Dx()
+	half := float64(w) / 2
+	changed, outside := 0, 0
+	for y := 0; y < w; y++ {
+		for x := 0; x < w; x++ {
+			if src.NRGBAAt(x, y) == got.NRGBAAt(x, y) {
+				continue
+			}
+			changed++
+			if math.Hypot(float64(x)+0.5-half, float64(y)+0.5-half) > half {
+				outside++
+			}
+		}
+	}
+	assert.Positive(t, changed, "a dot is drawn")
+	assert.Zero(t, outside, "pixels changed outside the crop circle")
+
+	outer := float64(w) * (dotFraction/2 + ringFraction)
+	centre := int(math.Round(half - (half-outer-1)/math.Sqrt2))
+	assert.Equal(t, fill, got.NRGBAAt(centre, centre), "dot colour at its centre")
+	ringAt := centre - int(float64(w)*(dotFraction/2+ringFraction/2))
+	assert.Equal(t, RingOnDark, got.NRGBAAt(centre, ringAt), "ring colour above the dot")
+}
+
 // TestOverlayGolden pins the composited pixels, so a change of the drawing is
 // a deliberate one.
 func TestOverlayGolden(t *testing.T) {
@@ -112,6 +149,12 @@ func TestParse(t *testing.T) {
 	c, err := Parse("#E8A33D")
 	require.NoError(t, err)
 	assert.Equal(t, color.NRGBA{R: 0xe8, G: 0xa3, B: 0x3d, A: 0xff}, c, "custom colour")
+	assert.Equal(t, "#E8A33D", Hex(c), "formatted as Parse accepts it")
+	for _, e := range Palette {
+		c, err := Parse(e.Name)
+		require.NoError(t, err, e.Name)
+		assert.Equal(t, e.Hex, Hex(c), "hex of %s", e.Name)
+	}
 
 	for _, bad := range []string{"", "#12345", "#1234567", "E8A33D", "#GGGGGG", "red", "#E8A33D;", "url(x)"} {
 		_, err := Parse(bad)

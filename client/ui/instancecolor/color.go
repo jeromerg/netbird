@@ -48,3 +48,8 @@ func Parse(s string) (color.NRGBA, error) {
 	}
 	return color.NRGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 0xff}, nil
 }
+
+// Hex formats an opaque colour as #RRGGBB, the form Parse accepts.
+func Hex(c color.NRGBA) string {
+	return fmt.Sprintf("#%02X%02X%02X", c.R, c.G, c.B)
+}
