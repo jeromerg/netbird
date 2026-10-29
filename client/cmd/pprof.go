@@ -6,6 +6,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 
@@ -13,8 +14,9 @@ import (
 )
 
 func init() {
-	addr := pprofAddr()
-	go pprof(addr)
+	startPprof = sync.OnceFunc(func() {
+		go pprof(pprofAddr())
+	})
 }
 
 func pprofAddr() string {

@@ -102,6 +102,7 @@ var (
 			if err := resolveInstance(cmd); err != nil {
 				return err
 			}
+			startPprof()
 
 			// Don't resolve for service commands — they create the socket, not connect to it.
 			if !isServiceCmd(cmd) {
@@ -118,6 +119,7 @@ var (
 // It returns any error produced during command execution.
 func Execute() error {
 	if isUpdateBinary() {
+		startPprof()
 		return updateCmd.Execute()
 	}
 	return rootCmd.Execute()
