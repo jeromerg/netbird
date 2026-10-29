@@ -85,3 +85,58 @@ v0.81.5 (`396976b8b`) unless stated otherwise.
 | `SBS-UPD-05` | `release.yml` and `sync-tag.yml` run on every `v*` tag, so a fork tag `v0.81.5+sbs.1` would also start upstream's release pipeline in the fork | `.github/workflows/fork-installer.yml` runs on tags `sbs-v<upstream version>+sbs.<n>` (for example `sbs-v0.81.5+sbs.1`) and on manual dispatch with a version. The version is still `0.81.5+sbs.1`; NSIS gets `APPVER=0.81.5.1` and the record gets the full version |
 | `SBS-UPD-05`, brief step 6 | `release.yml` cross-compiles the Windows binaries on Linux (mingw) and packages them with NSIS on a Windows runner | The workflow does the same: one Linux job builds `netbird.exe` and `netbird-ui.exe` with the release's flags and version resources, one `windows-2022` job adds `wintun.dll`, the WebView2 bootstrapper and the two NSIS plugins (URLs and checksums from `release.yml`) and runs `makensis`. Nothing is signed. The artifact is `netbird-installer.exe`, kept 30 days |
 | Verification | | `actionlint` passes. The build commands of the Linux job were run here: both binaries build, and `makensis` packages them into a 19 MB installer. In Wine, that installer registers `Netbird_acme` with display name `NetBird (ACME)` and the command line of `SBS-SVC-01`, while the default service gets exactly the command line that the v0.81.5 binary registers. The workflow itself has not run: nothing could be pushed from this session |
+
+## Final report
+
+### 1. Steps
+
+Sizes count added lines without tests and documentation.
+
+| Step | Commit | What it does | Deviations |
+|---|---|---|---|
+| 1 Identity package | `ce07f747` | `client/internal/instance` derives every machine-wide identifier from the installation name, and today's literals moved behind it. The golden test `T-DEF-01` was written first, passed against the unmodified code, and pins the v0.81.5 values for eight platforms; a source scan (`T-ID-04`) keeps derived literals out of the rest of the client. About 800 lines | Ports cannot be disjoint between two named installations (100 slots); the panic log path is written with `\` only; exported constants became functions or were removed (step 1 table) |
+| 2 Windows isolation | `0cc07479` | `--instance` and `--instance-role` with the specified precedence, service registration with a fail-before-write check, the protected pipe rule, no legacy TCP, state, log and per-user folders, legacy routing and `NB_STATE_DIR` refused with a warning, firewall rules recreated, SSH config commands, no upstream update, suggested commands with `--instance`, status fields and `netbird instance list`. About 900 lines | Leftover wintun adapters are not removed on uninstall (needs a `go.mod` change); pprof builds keep their port; the role shown by the CLI comes from the record (step 2 table) |
+| 3 Coexistence rules | `24f5ec3a` | Secondaries ignore and refuse exit nodes, drop the DNS catch-all, skip namespaces another installation claims, use interface metric 1000 and refuse an overlapping overlay; every installation keeps its control traffic off every NetBird adapter; the policy split and `disableNamedInstallations`, also added to the ADMX template. About 950 lines | An overlap that appears after connecting is not detected (SHOULD); warnings are system events (step 3 table) |
+| 4 Tray UI | `7e4a20a4` | Per-installation lock, application name, toast activator and source name, quick-actions event, WebView2 folder, autostart entry, titles, menu header, colour dot on every Windows tray icon (standard library only), and no upstream installer link. About 440 lines plus a small React change | The settings window does not show the installation details and there is no colour stripe (both SHOULD) (step 4 table) |
+| 5 NSIS installer | `f2e65c9c` | Welcome-page checkbox and named-installation page, `/INSTANCE=`, `/COLOR=`, `/ROLE=`, `/AUTOSTART=`, per-installation registration and record, upgrade through the installation's own uninstaller, and an uninstaller that identifies its installation and fails closed. About 970 lines of NSIS | The default installation's upgrade prompt moved from start-up to leaving the Welcome page; the uninstaller also accepts a default installation in a custom folder; the install log is `%TEMP%\netbird-installer.log` (step 5 table) |
+| 6 Fork build | `7cc1e9d2` | Workflow that builds an unsigned NSIS installer from a tag. About 240 lines | Tags are `sbs-v<version>+sbs.<n>`, not `v...`, so upstream's release workflows do not run (step 6 table) |
+
+### 2. Verified here, and not
+
+Verified in this Linux environment:
+
+- `gofmt`; `go build ./...` (fails on `magefiles` on the baseline too); `GOOS=windows` and `GOOS=darwin` builds of the client (darwin without the cgo-only UI); WASM, Android vet and the embedded client. FreeBSD cannot be cross-compiled from Linux at baseline (`wgctrl`); per package, the same 50 of 135 client packages fail before and after.
+- `golangci-lint run --new-from-rev=396976b8b`: 0 issues for every step, on the whole repository for Linux and on `./client/...` with `GOOS=windows`.
+- `make test-unit` after steps 1 to 4: the only failures are the ones the unmodified baseline has in this environment (no Docker, no real DNS, no kernel modules: `client/iface/bind`, `client/iface/device`, `client/internal/dns`, `client/internal/dns/mgmt`, `sharedsock`, several `management` packages, `tools/mysql-migrate`, `upload-server`), plus three timing flakes that passed on rerun (`shared/relay/client`, `proxy`, `client/ssh/server`). Touched packages also pass with `-race`, except `TestServer_SubcribeEvents`, which races on the baseline too.
+- The step tests of `05-test-plan.md` section 3 that run on Linux: `T-DEF-01`, `T-ID-01` to `-05`, `T-NET-03`, `T-COEX-U1`, `-U3`, `T-DNS-U1`, `-U2`, `T-SSH-U1`, `T-UPD-U1`, `T-POL-U1`, `T-CLI-U1`, `T-PLAT-01`, `T-COL-02`, and a fuzz run of `T-ID-02`. `T-COEX-U2` is Windows-only; it compiles here and runs in the Windows CI.
+- Frontend: `pnpm install --frozen-lockfile`, `pnpm check`, `pnpm build`.
+- Installer: compiled with `makensis -WX`; run in Wine as described in the step 5 and step 6 tables, including service registration with the real binaries.
+
+Not verified here:
+
+- Any Windows runtime behaviour: adapters, routes, metrics, NRPT, firewall, pipes, SSH, toasts, autostart, the tray icon on a real taskbar, and the installer's pages and colour dialog.
+- `make test-privileged`: no Docker daemon is running in this environment.
+- The fork workflow: it has not run, because nothing could be pushed.
+
+### 3. Manual tests on a Windows VM, in this order
+
+1. `T-WIN-01` upgrade of an official v0.81.5 default installation (the snapshot diff must show versions and timestamps only).
+2. `T-WIN-02` fresh default plus `ACME`, both connected.
+3. `T-WIN-08` `ACME` next to the official default installation, including the official installer and updater.
+4. `T-SVC-01` to `T-SVC-04`, `T-SEC-01`.
+5. `T-INS-01` to `T-INS-06`: pages, layout of the Welcome checkbox, the colour dialog, parameters, record ACL, stray uninstaller.
+6. `T-WIN-03` to `T-WIN-07`: stop, kill, uninstall, stable adapter, reboot order, upgrades.
+7. `T-FS-02`, `T-FS-03`, `T-CLI-01` to `T-CLI-04`, `T-PROF-01`.
+8. `T-NET-02`, `T-NET-05`, `T-NET-06`, `T-FW-01`, `T-FW-02`, `T-SSH-01` to `T-SSH-03`.
+9. `T-DNS-01` to `T-DNS-05`, `T-COEX-01` to `T-COEX-07` (lab networks).
+10. `T-UI-01` to `T-UI-06`, `T-COL-01`, `T-COL-03`: in particular whether toasts show `NetBird (ACME)` (`T-UI-04`) and how the dot reads at 100 %, 150 % and 200 %.
+11. `T-UPD-01` to `T-UPD-03`, `T-POL-01` to `T-POL-03`.
+12. The Windows CI jobs of the fork (`golang-test-windows.yml`), which run the Windows-only tests (`T-COEX-U2`, the NRPT tests) and `T-DEF-01` on Windows.
+
+### 4. Open points for the owner
+
+1. **Push access.** The session's git proxy refused `jeromerg/netbird` ("not in this session's authorized repository set"). The six commits are on the local branch `claude/side-by-side-installations`; nothing is on GitHub. Add the repository to the session's sources, or fetch the bundle in the scratchpad.
+2. **Size.** Steps 1 to 3 are 800 to 950 hand-written lines each and step 5 about 970 lines of NSIS, above the estimates in `00-overview.md` section 8 and the 400 lines `AGENTS.md` asks for per PR. Before proposing upstream, decide how to split them further (for example step 2 into service/IPC, files and suggested commands; step 3 into routing, DNS and policy).
+3. **Public surface changes upstream would see:** the removed or changed exported identifiers of step 1, the new `disableNamedInstallations` ADMX value, the new `netbird instance` command, and the Welcome-page checkbox with the moved upgrade prompt of the default installation.
+4. **SHOULDs left out:** leftover adapter removal (`SBS-SVC-06`), late overlap detection (`SBS-COEX-04`), installation details and colour stripe in the UI (`SBS-UI-09`, `SBS-COL-04`), pprof port (`SBS-NET-05`).
+5. **Q4** is still open in `99-open-questions.md`: whether ACME configures a catch-all nameserver group, which a secondary drops.
