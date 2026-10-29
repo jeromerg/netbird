@@ -5,7 +5,8 @@ name: Fork installer (side-by-side installations)
 #
 # Tag sbs-v<upstream version>+sbs.<n>, for example sbs-v0.81.5+sbs.1. The tags
 # do not start with "v", so they do not start release.yml or sync-tag.yml,
-# which react to upstream release tags.
+# which react to upstream release tags. A tag also creates a draft release
+# with the installer attached.
 
 on:
   push:
@@ -80,7 +81,7 @@ jobs:
           cache: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -225,8 +226,9 @@ jobs:
           DISPLAY_VERSION: ${{ needs.version.outputs.version }}
         run: |
           $nsisPluginDir = "C:\Program Files (x86)\NSIS\Plugins\x86-unicode"
-          $srcPlugins    = "${{ github.workspace }}\NSIS_Plugins\Plugins\x86-unicode"
-          Get-ChildItem -Path $srcPlugins -Filter *.dll | Copy-Item -Destination $nsisPluginDir -Force
+          $srcPlugins    = "${{ github.workspace }}\NSIS_Plugins\Plugins"
+          Get-ChildItem -Path $srcPlugins -Recurse -Filter *.dll |
+            Copy-Item -Destination $nsisPluginDir -Force
           & "C:\Program Files (x86)\NSIS\makensis.exe" /V4 "/DARCH=amd64" "/DDISPLAY_VERSION=$env:DISPLAY_VERSION" client\installer.nsis
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
 
@@ -236,3 +238,33 @@ jobs:
           name: netbird-installer-${{ needs.version.outputs.version }}
           path: netbird-installer.exe
           retention-days: 30
+
+  release:
+    name: Draft release
+    needs: [version, installer]
+    if: startsWith(github.ref, 'refs/tags/sbs-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: netbird-installer-${{ needs.version.outputs.version }}
+          path: installer
+
+      # A draft fires no "published" event, so forum.yml, which announces
+      # upstream releases, does not run in the fork.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          file="netbird-installer-$VERSION.exe"
+          mv installer/netbird-installer.exe "$file"
+          sha256sum "$file" > "$file.sha256"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
+            --title "NetBird $VERSION, side-by-side installations (unsigned)" \
+            --notes "Unsigned test build of the side-by-side installations branch, from commit $GITHUB_SHA." \
+            "$file" "$file.sha256"
