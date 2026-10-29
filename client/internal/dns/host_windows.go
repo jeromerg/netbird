@@ -16,9 +16,12 @@ import (
 
 	"github.com/hashicorp/go-multierror"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 
 	nberrors "github.com/netbirdio/netbird/client/errors"
+	"github.com/netbirdio/netbird/client/internal/coexist"
 	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/statemanager"
 	"github.com/netbirdio/netbird/client/internal/winregistry"
@@ -131,6 +134,12 @@ type registryConfigurator struct {
 	routingAll      bool
 	gpo             bool
 	origNameservers []netip.Addr
+
+	// secondary is set for a secondary installation, which never takes over
+	// system DNS and skips namespaces another installation claims.
+	secondary       bool
+	loggedCatchAll  bool
+	lastSkippedNSes []string
 }
 
 func newHostManager(wgInterface WGIface) (*registryConfigurator, error) {
@@ -140,8 +149,9 @@ func newHostManager(wgInterface WGIface) (*registryConfigurator, error) {
 	}
 
 	configurator := &registryConfigurator{
-		guid: guid,
-		gpo:  useGPOPolicyStore(),
+		guid:      guid,
+		gpo:       useGPOPolicyStore(),
+		secondary: instance.Current().IsSecondary(),
 	}
 
 	origNameservers, err := configurator.captureOriginalNameservers()
@@ -198,9 +208,13 @@ func (r *registryConfigurator) captureFromTcpipRoot(rootPath string) ([]netip.Ad
 		return nil, fmt.Errorf("read subkeys: %w", err)
 	}
 
+	overlays := overlayAdapterGUIDs()
 	var out []netip.Addr
 	for _, guid := range guids {
 		if strings.EqualFold(guid, r.guid) {
+			continue
+		}
+		if _, ok := overlays[strings.ToLower(guid)]; ok {
 			continue
 		}
 		out = append(out, readInterfaceNameservers(rootPath, guid)...)
@@ -322,6 +336,14 @@ func (r *registryConfigurator) disableWINSForInterface() error {
 }
 
 func (r *registryConfigurator) applyDNSConfig(config HostDNSConfig, stateManager *statemanager.Manager) error {
+	if r.secondary {
+		var dropped bool
+		if config, dropped = secondaryHostConfig(config); dropped && !r.loggedCatchAll {
+			r.loggedCatchAll = true
+			log.Infof("this secondary installation does not take over system DNS: the catch-all nameserver group was dropped, its match domains stay")
+		}
+	}
+
 	// Clear every rule the previous apply installed before installing any new
 	// one, including a leftover catch-all: removal is unconditional so a rule
 	// from an earlier run cannot survive into a config that no longer wants it.
@@ -372,6 +394,10 @@ func (r *registryConfigurator) applyDNSConfig(config HostDNSConfig, stateManager
 		}
 	}
 
+	if r.secondary {
+		matchDomains = r.dropForeignNamespaces(matchDomains)
+	}
+
 	if len(matchDomains) != 0 {
 		if err := r.addDNSMatchPolicy(matchDomains, config.ServerIP); err != nil {
 			return fmt.Errorf("add dns match policy: %w", err)
@@ -387,6 +413,77 @@ func (r *registryConfigurator) applyDNSConfig(config HostDNSConfig, stateManager
 	go r.flushDNSCache()
 
 	return nil
+}
+
+// dropForeignNamespaces skips the match domains another installation's NRPT
+// rules already claim, in either store. It runs on every apply, so a namespace
+// the primary claims later is skipped from then on.
+func (r *registryConfigurator) dropForeignNamespaces(matchDomains []string) []string {
+	claimed := make(map[string]struct{})
+	for _, root := range []string{DNSPolicyConfigRoot, GPODNSPolicyConfigRoot} {
+		for _, ns := range readForeignNamespaces(root) {
+			claimed[strings.ToLower(ns)] = struct{}{}
+		}
+	}
+	kept, skipped := dropClaimedNamespaces(matchDomains, claimed)
+	r.lastSkippedNSes = skipped
+	if len(skipped) > 0 {
+		log.Warnf("skipping DNS namespaces another NetBird installation already routes: %v", skipped)
+	}
+	return kept
+}
+
+func (r *registryConfigurator) skippedNamespaces() []string {
+	return r.lastSkippedNSes
+}
+
+// readForeignNamespaces returns the namespaces of the other installations'
+// NRPT rules under a policy store root.
+func readForeignNamespaces(root string) []string {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, root, registry.ENUMERATE_SUB_KEYS)
+	if err != nil {
+		return nil
+	}
+	defer closer(k)
+
+	names, err := k.ReadSubKeyNames(-1)
+	if err != nil {
+		log.Debugf("read NRPT rules under %s: %v", root, err)
+		return nil
+	}
+	var out []string
+	for _, name := range names {
+		if !isForeignNRPTKey(name, NRPTKeyPrefix()) {
+			continue
+		}
+		rule, err := registry.OpenKey(registry.LOCAL_MACHINE, root+`\`+name, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		if ns, _, err := rule.GetStringsValue(dnsPolicyConfigNameKey); err == nil {
+			out = append(out, ns...)
+		}
+		closer(rule)
+	}
+	return out
+}
+
+// overlayAdapterGUIDs returns the lowercase GUIDs of every NetBird adapter, so
+// the capture of fallback nameservers never records another installation's
+// overlay DNS address, which can outlive that installation's session.
+func overlayAdapterGUIDs() map[string]struct{} {
+	adapters, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, winipcfg.GAAFlagDefault)
+	if err != nil {
+		log.Debugf("list adapters to skip NetBird adapters' nameservers: %v", err)
+		return nil
+	}
+	out := make(map[string]struct{})
+	for _, a := range adapters {
+		if coexist.IsOverlayInterface(a.FriendlyName()) {
+			out[strings.ToLower(a.AdapterName())] = struct{}{}
+		}
+	}
+	return out
 }
 
 func (r *registryConfigurator) updateState(stateManager *statemanager.Manager) {

@@ -28,6 +28,7 @@ import (
 	"github.com/netbirdio/netbird/client/iface/netstack"
 	"github.com/netbirdio/netbird/client/internal/certproof"
 	"github.com/netbirdio/netbird/client/internal/dns"
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/lazyconn"
 	"github.com/netbirdio/netbird/client/internal/listener"
 	"github.com/netbirdio/netbird/client/internal/metrics"
@@ -265,6 +266,11 @@ func (c *ConnectClient) run(mobileDependency MobileDependency, runningChan chan 
 	}()
 
 	wrapErr := state.Wrap
+	if err := checkNamedAllowed(instance.Current(), c.config.Policy()); err != nil {
+		c.statusRecorder.PublishEvent(cProto.SystemEvent_ERROR, cProto.SystemEvent_SYSTEM, err.Error(), err.Error(), nil)
+		return wrapErr(err)
+	}
+
 	myPrivateKey, err := wgtypes.ParseKey(c.config.PrivateKey)
 	if err != nil {
 		log.Errorf("failed parsing Wireguard key: %s", err)
@@ -450,6 +456,9 @@ func (c *ConnectClient) run(mobileDependency MobileDependency, runningChan chan 
 		engineConfig, err := createEngineConfig(myPrivateKey, c.config, peerConfig, logPath)
 		if err != nil {
 			log.Error(err)
+			return wrapErr(err)
+		}
+		if err := checkCoexistence(c.statusRecorder, instance.Current(), engineConfig); err != nil {
 			return wrapErr(err)
 		}
 		engineConfig.TempDir = mobileDependency.TempDir
