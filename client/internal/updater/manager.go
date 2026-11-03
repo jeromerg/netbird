@@ -10,6 +10,7 @@ import (
 	v "github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/netbirdio/netbird/client/internal/instance"
 	"github.com/netbirdio/netbird/client/internal/peer"
 	"github.com/netbirdio/netbird/client/internal/statemanager"
 	"github.com/netbirdio/netbird/client/internal/updater/installer"
@@ -41,6 +42,8 @@ func (u UpdateState) Name() string {
 }
 
 type Manager struct {
+	// ctx is the daemon lifetime context a forced directive starts the loop with.
+	ctx            context.Context
 	statusRecorder *peer.Status
 	stateManager   *statemanager.Manager
 
@@ -76,16 +79,28 @@ type Manager struct {
 	autoUpdateSupported func() bool
 }
 
+// autoUpdateSupportedFor disables installing for a named installation: the
+// upstream installer knows only the default installation and would upgrade or
+// replace it. The manager then runs download-only, so a newer version is still
+// reported.
+func autoUpdateSupportedFor(inst instance.Instance) func() bool {
+	if !inst.IsDefault() {
+		return func() bool { return false }
+	}
+	return isAutoUpdateSupported
+}
+
 // NewManager creates a new update manager. The manager is single-use: once Stop() is called, it cannot be restarted.
-func NewManager(statusRecorder *peer.Status, stateManager *statemanager.Manager) *Manager {
+func NewManager(ctx context.Context, statusRecorder *peer.Status, stateManager *statemanager.Manager) *Manager {
 	manager := &Manager{
+		ctx:                 ctx,
 		statusRecorder:      statusRecorder,
 		stateManager:        stateManager,
 		mgmUpdateChan:       make(chan struct{}, 1),
 		updateChannel:       make(chan struct{}, 1),
 		currentVersion:      version.NetbirdVersion(),
 		update:              version.NewUpdate("nb/client"),
-		autoUpdateSupported: isAutoUpdateSupported,
+		autoUpdateSupported: autoUpdateSupportedFor(instance.Current()),
 	}
 
 	stateManager.RegisterState(&UpdateState{})
@@ -177,13 +192,23 @@ func (m *Manager) SetVersion(expectedVersion string, forceUpdate bool) {
 		return
 	}
 
+	if m.applyDirective(expectedVersion, forceUpdate) && forceUpdate {
+		// A forced update installs without user interaction, so it must not wait
+		// for a UI to subscribe to daemon events, the only other caller of Start.
+		m.Start(m.ctx)
+	}
+}
+
+// applyDirective records a management directive and reports whether it put the
+// manager into a new managed state.
+func (m *Manager) applyDirective(expectedVersion string, forceUpdate bool) bool {
 	m.updateMutex.Lock()
 	defer m.updateMutex.Unlock()
 
 	if expectedVersion == "" {
 		log.Errorf("empty expected version provided")
 		m.setModeLocked(modeDownloadOnly)
-		return
+		return false
 	}
 
 	var expectedSemVer *v.Version
@@ -196,13 +221,13 @@ func (m *Manager) SetVersion(expectedVersion string, forceUpdate bool) {
 			case m.mgmUpdateChan <- struct{}{}:
 			default:
 			}
-			return
+			return false
 		}
 		expectedSemVer = parsed
 	}
 
 	if m.sameDirectiveLocked(expectedSemVer, forceUpdate) {
-		return
+		return false
 	}
 
 	m.setModeLocked(modeManaged)
@@ -214,6 +239,7 @@ func (m *Manager) SetVersion(expectedVersion string, forceUpdate bool) {
 	case m.mgmUpdateChan <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 func (m *Manager) ResetMode() {
