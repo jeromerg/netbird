@@ -1,3 +1,5 @@
+//go:build !android && !ios && !freebsd && !js
+
 package services
 
 import (
