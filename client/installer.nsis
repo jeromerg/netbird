@@ -92,6 +92,7 @@ ShowInstDetails Show
 Page custom NamedPageCreate NamedPageLeave
 
 !define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPre
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryLeave
 !insertmacro MUI_PAGE_DIRECTORY
 
 !insertmacro MUI_PAGE_INSTFILES
@@ -426,6 +427,13 @@ FunctionEnd
 !insertmacro NB_LOG ""
 !insertmacro NB_LOG "un."
 
+; netbird commands without --instance act on the installation NB_INSTANCE names.
+; Clear it for this process and the commands it runs, so that they act on the
+; default installation whatever the environment of the user, updater or MDM agent.
+!macro NB_CLEAR_INSTANCE_ENV
+  System::Call 'kernel32::SetEnvironmentVariable(t "NB_INSTANCE", p 0)'
+!macroend
+
 ; Pushes "1" when machine policy forbids named installations.
 Function NbNamedDisabledByPolicy
   Push $0
@@ -535,6 +543,75 @@ Function NbOtherPrimary
       IntOp $0 $0 + 1
     ${Loop}
   ${EndIf}
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Pops a folder, pushes "1" when it is $R0, contains $R0 or is inside $R0.
+Function NbFolderOverlaps
+  Exch $0
+  Push $1
+  Push $2
+  StrCpy $1 "0"
+  StrLen $2 "$0\"
+  StrCpy $2 "$R0\" $2
+  ${If} $2 == "$0\"
+    StrCpy $1 "1"
+  ${EndIf}
+  StrLen $2 "$R0\"
+  StrCpy $2 "$0\" $2
+  ${If} $2 == "$R0\"
+    StrCpy $1 "1"
+  ${EndIf}
+  StrCpy $0 $1
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; In: $R0 = a program folder. Out: $R1 = the other installation whose folder is
+; $R0, contains it or is inside it, else "". Installing there would overwrite
+; that installation's files and end its UI; uninstalling would delete them.
+Function NbFolderOwner
+  Push $0
+  Push $1
+  Push $2
+  StrCpy $R1 ""
+  ${If} $NamedMode == "1"
+    Push "${INSTALL_DIR}"
+    Call NbFolderOverlaps
+    Pop $0
+    ReadRegStr $1 HKLM "${UNINSTALL_PATH}" "UninstallString"
+    ${If} $0 != "1"
+    ${AndIf} $1 != ""
+      ${GetParent} $1 $1
+      Push $1
+      Call NbFolderOverlaps
+      Pop $0
+    ${EndIf}
+    ${If} $0 == "1"
+      StrCpy $R1 "the default installation"
+    ${EndIf}
+  ${EndIf}
+  StrCpy $2 0
+  ${DoWhile} $R1 == ""
+    EnumRegKey $1 HKLM "${RECORDS_KEY}" $2
+    ${If} $1 == ""
+      ${Break}
+    ${EndIf}
+    IntOp $2 $2 + 1
+    ReadRegStr $0 HKLM "${RECORDS_KEY}\$1" "InstallDir"
+    ${If} $1 != $Instance
+    ${AndIf} $0 != ""
+      Push $0
+      Call NbFolderOverlaps
+      Pop $0
+      ${If} $0 == "1"
+        StrCpy $R1 'the installation "$1"'
+      ${EndIf}
+    ${EndIf}
+  ${Loop}
   Pop $2
   Pop $1
   Pop $0
@@ -1037,16 +1114,45 @@ Function DirectoryPre
   ${EndIf}
 FunctionEnd
 
+; Refuses a folder shared with another installation. Browse appends "Netbird" to
+; the chosen folder, so picking Program Files for a named installation would land
+; on the default installation's folder.
+Function DirectoryLeave
+  Push $R0
+  Push $R1
+  StrCpy $R0 $INSTDIR
+  Call NbFolderOwner
+  StrCpy $R0 $R1
+  Pop $R1
+  ${If} $R0 != ""
+    MessageBox MB_ICONEXCLAMATION "$INSTDIR is, contains or is inside the program folder of $R0. Choose another folder."
+    Pop $R0
+    Abort
+  ${EndIf}
+  Pop $R0
+FunctionEnd
+
 ######################################################################
 Function .onInit
 StrCpy $INSTDIR "${INSTALL_DIR}"
 SetRegView 64
+!insertmacro NB_CLEAR_INSTANCE_ENV
 
 Call NbParseParameters
 ${If} $NamedMode == "1"
     ; A named installation never touches the default one: its upgrade, if any,
     ; runs in the -NamedPrepare section with that installation's own uninstaller.
     Call NbResolveNamedTarget
+    ; Interactive runs check the folder on leaving the Directory page.
+    ${If} ${Silent}
+    ${AndIf} $IsUpgrade != "1"
+        StrCpy $R0 $INSTDIR
+        Call NbFolderOwner
+        ${If} $R1 != ""
+            Push "$INSTDIR is, contains or is inside the program folder of $R1."
+            Call NbFailParam
+        ${EndIf}
+    ${EndIf}
 ${Else}
     ; Interactive runs ask on leaving the Welcome page, once the user has
     ; chosen between the default and a named installation.
@@ -1057,6 +1163,7 @@ FunctionEnd
 
 Function un.onInit
 SetRegView 64
+!insertmacro NB_CLEAR_INSTANCE_ENV
 StrCpy $DataDir "${NETBIRD_DATA_DIR}"
 StrCpy $UpgradeRun "0"
 ${un.GetParameters} $R9
@@ -1122,14 +1229,37 @@ FunctionEnd
 
 ; Ends the UI processes whose executable is inside this installation's folder,
 ; and only those: other installations' UIs keep running.
-Function un.NbEndOwnUI
+!macro NB_END_OWN_UI UN
+Function ${UN}NbEndOwnUI
+  Push $0
+  Push $1
   DetailPrint "Terminating the NetBird UI of this installation..."
-  nsExec::ExecToLog `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name 'netbird-ui*' -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith('$INSTDIR\', [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"`
+  ; The 32-bit PowerShell that this 32-bit installer would start sees no path
+  ; for a 64-bit process.
+  StrCpy $1 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  ${IfNot} ${FileExists} "$1"
+    StrCpy $1 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  ${EndIf}
+  ; Through the environment, so that the folder is never parsed as code.
+  StrCpy $0 "$INSTDIR\"
+  System::Call 'kernel32::SetEnvironmentVariable(t "NETBIRD_UI_DIR", t r0)'
+  nsExec::ExecToLog `"$1" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process -Name 'netbird-ui*' -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith($$env:NETBIRD_UI_DIR, 'OrdinalIgnoreCase') } | Stop-Process -Force"`
   Pop $0
   ${If} $0 != 0
-    DetailPrint "Could not end the NetBird UI of this installation ($0)."
+    ; No other installation uses this installation's UI file name.
+    DetailPrint "Could not end the NetBird UI by its folder ($0); ending it by its file name."
+    ${If} $Instance != ""
+      ExecWait '"$SYSDIR\taskkill.exe" /im netbird-ui_$Instance.exe /f'
+    ${Else}
+      ExecWait '"$SYSDIR\taskkill.exe" /im ${UI_APP_EXE}.exe /f'
+    ${EndIf}
   ${EndIf}
+  Pop $1
+  Pop $0
 FunctionEnd
+!macroend
+!insertmacro NB_END_OWN_UI ""
+!insertmacro NB_END_OWN_UI "un."
 ######################################################################
 ; Upgrade or repair of a named installation: only its own uninstaller runs, in
 ; upgrade mode, which keeps the record, the state folder and the per-user
@@ -1157,10 +1287,18 @@ Section -MainProgram
     ; The previous uninstaller stops the service and the UI only when its uninstall key
     ; is found and endpoint protection lets the unsigned uninstaller run. Extraction
     ; fails on any exe that is still running.
-    DetailPrint "Stopping Netbird service..."
-    ExecWait '"$INSTDIR\${MAIN_APP_EXE}" service stop'
-    DetailPrint "Terminating ${UI_APP_NAME} process..."
-    ExecWait '"$SYSDIR\taskkill.exe" /im ${UI_APP_EXE}.exe /f'
+    ${If} $NamedMode == "1"
+        ; Without --instance the service command acts on the default installation,
+        ; and netbird-ui.exe is the default installation's UI.
+        DetailPrint "Stopping the NetBird service of $Instance..."
+        ExecWait '"$INSTDIR\${MAIN_APP_EXE}" service stop --instance $Instance'
+        Call NbEndOwnUI
+    ${Else}
+        DetailPrint "Stopping Netbird service..."
+        ExecWait '"$INSTDIR\${MAIN_APP_EXE}" service stop'
+        DetailPrint "Terminating ${UI_APP_NAME} process..."
+        ExecWait '"$SYSDIR\taskkill.exe" /im ${UI_APP_EXE}.exe /f'
+    ${EndIf}
     ; Both return before the processes release their image files.
     Sleep 3000
     # SetOverwrite ifnewer
