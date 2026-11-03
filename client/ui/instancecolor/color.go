@@ -16,7 +16,7 @@ type Entry struct {
 }
 
 // Palette is the Okabe-Ito set without black, which disappears on a dark
-// taskbar. The order decides which colour the installer pre-selects: colours
+// taskbar. The order decides which colour the installer preselects: colours
 // that cannot be mistaken for a tray state or the brand come first.
 var Palette = []Entry{
 	{"purple", "#CC79A7"},
@@ -25,7 +25,7 @@ var Palette = []Entry{
 	{"orange", "#E69F00"},
 	{"blue", "#0072B2"},
 	{"green", "#009E73"},
-	{"vermillion", "#D55E00"},
+	{"vermilion", "#D55E00"},
 }
 
 // Parse accepts a palette name or a #RRGGBB value, in any case. The value comes

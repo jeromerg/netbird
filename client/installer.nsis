@@ -339,7 +339,7 @@ Function NbResolveColor
       StrCpy $R1 "#0072B2"
     ${Case} "green"
       StrCpy $R1 "#009E73"
-    ${Case} "vermillion"
+    ${Case} "vermilion"
       StrCpy $R1 "#D55E00"
   ${EndSelect}
   ${If} $R1 != ""
@@ -870,7 +870,7 @@ Function NamedPageCreate
   ${NSD_CB_AddString} $ColorCombo "orange"
   ${NSD_CB_AddString} $ColorCombo "blue"
   ${NSD_CB_AddString} $ColorCombo "green"
-  ${NSD_CB_AddString} $ColorCombo "vermillion"
+  ${NSD_CB_AddString} $ColorCombo "vermilion"
   ${NSD_SetText} $ColorCombo "$InstanceColor"
   ${NSD_OnChange} $ColorCombo NamedPageUpdate
   ${NSD_CreateBitmap} 166u 29u 12u 10u ""
